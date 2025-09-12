@@ -30,11 +30,11 @@ core:
 	cd native && cargo build
 test-rust:
 	# We need to compile CometException so that the cargo test can pass
-	./mvnw compile -pl common -DskipTests $(PROFILES)
+	./mvnw compile -pl common -Dspotless.check.skip=true -Dscalastyle.skip=true -DskipTests  $(PROFILES)
 	cd native && cargo build && \
 	RUST_BACKTRACE=1 cargo test
 jvm:
-	./mvnw clean package -DskipTests $(PROFILES)
+	./mvnw clean package -Dspotless.check.skip=true -Dscalastyle.skip=true -DskipTests $(PROFILES)
 test-jvm: core
 	SPARK_HOME=`pwd` COMET_CONF_DIR=$(shell pwd)/conf RUST_BACKTRACE=1 ./mvnw verify $(PROFILES)
 test: test-rust test-jvm
@@ -96,13 +96,13 @@ release-linux: clean
 	cd native && RUSTFLAGS="-Ctarget-cpu=apple-m1" CC=arm64-apple-darwin21.4-clang CXX=arm64-apple-darwin21.4-clang++ CARGO_FEATURE_NEON=1 cargo build --target aarch64-apple-darwin --release
 	cd native && RUSTFLAGS="-Ctarget-cpu=skylake -Ctarget-feature=-prefer-256-bit" CC=o64-clang CXX=o64-clang++ cargo build --target x86_64-apple-darwin --release
 	cd native && RUSTFLAGS="-Ctarget-cpu=native -Ctarget-feature=-prefer-256-bit" cargo build --release
-	./mvnw install -Prelease -DskipTests $(PROFILES)
+	./mvnw install -Prelease -Dspotless.check.skip=true -Dscalastyle.skip=true -DskipTests $(PROFILES)
 release:
 	cd native && RUSTFLAGS="$(RUSTFLAGS) -Ctarget-cpu=native" cargo build --release $(FEATURES_ARG)
-	./mvnw install -Prelease -DskipTests $(PROFILES)
+	./mvnw install -Prelease -Dspotless.check.skip=true -Dscalastyle.skip=true -DskipTests $(PROFILES)
 release-nogit:
 	cd native && RUSTFLAGS="-Ctarget-cpu=native" cargo build --release
-	./mvnw install -Prelease -DskipTests $(PROFILES) -Dmaven.gitcommitid.skip=true
+	./mvnw install -Prelease -Dspotless.check.skip=true -Dscalastyle.skip=true -DskipTests $(PROFILES) -Dmaven.gitcommitid.skip=true
 benchmark-%: release
 	cd spark && COMET_CONF_DIR=$(shell pwd)/conf MAVEN_OPTS='-Xmx20g ${call spark_jvm_17_extra_args}' ../mvnw exec:java -Dexec.mainClass="$*" -Dexec.classpathScope="test" -Dexec.cleanupDaemonThreads="false" -Dexec.args="$(filter-out $@,$(MAKECMDGOALS))" $(PROFILES)
 .DEFAULT:

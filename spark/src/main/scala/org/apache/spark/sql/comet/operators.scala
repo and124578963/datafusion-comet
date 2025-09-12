@@ -254,6 +254,41 @@ abstract class CometNativeExec extends CometExec {
           throw new CometRuntimeException(s"Cannot find the first non broadcast plan: $this")
         }
 
+        // --- start debug block ---
+        val threadName = Thread.currentThread().getName
+        println(s"\n[$threadName] " + ("=" * 20) + " COMET PRE-EXECUTION PARTITION DEBUG " + ("=" * 20))
+        if (firstNonBroadcastPlan.isDefined) {
+          val (planToExecute, planIndex) = firstNonBroadcastPlan.get
+          println(
+            s"[$threadName] Identified 'firstNonBroadcastPlan' at index $planIndex: ${planToExecute.simpleStringWithNodeId}")
+          println(
+            s"[$threadName] Inspecting its input plans BEFORE triggering execution to find partition mismatch source.")
+
+          val childInputPlans = new ArrayBuffer[SparkPlan]
+          foreachUntilCometInput(planToExecute)(childInputPlans += _)
+          println(
+            s"[$threadName] Found ${childInputPlans.size} direct RDD sources for '${planToExecute.nodeName}':")
+          if (childInputPlans.isEmpty) {
+            println(
+              s"[$threadName]   -> No direct RDD sources found for this plan. Likely it's a leaf node.")
+          } else {
+            childInputPlans.foreach { childPlan =>
+
+              val numPartitions = childPlan.outputPartitioning.numPartitions
+              println(
+                s"[$threadName]   -> Input source: ${childPlan.simpleStringWithNodeId},  Output Partitions: $numPartitions, Partitioning Scheme: ${childPlan.outputPartitioning}")
+            }
+          }
+        } else {
+          println(
+            s"[$threadName] WARN: No non-broadcast plan found. The issue might be related to broadcast plans.")
+          println(s"[$threadName] All collected sparkPlans:")
+          sparkPlans.foreach(p =>
+            println(s"[$threadName]   - ${p.simpleStringWithNodeId}, Partitions: ${p.outputPartitioning.numPartitions}"))
+        }
+        println(s"[$threadName] " + "=" * 73 + "PRE-EXECUTION END \n")
+        // --- end debug block ---
+
         // If the first non broadcast plan is found, we need to adjust the partition number of
         // the broadcast plans to make sure they have the same partition number as the first non
         // broadcast plan.
@@ -301,6 +336,39 @@ abstract class CometNativeExec extends CometExec {
         if (inputs.isEmpty && !sparkPlans.forall(_.isInstanceOf[CometNativeExec])) {
           throw new CometRuntimeException(s"No input for CometNativeExec:\n $this")
         }
+
+        // --- start debug block ---
+        println(s"\n[$threadName] " + ("=" * 20) + " COMET PARTITION DEBUGGING TOTAL " + ("=" * 20))
+        println(s"[$threadName] Node: ${this.simpleStringWithNodeId()}")
+        println(
+          s"[$threadName] Expected partition count from first non-broadcast plan: $firstNonBroadcastPlanNumPartitions")
+        println(s"[$threadName] Total SparkPlans collected: ${sparkPlans.size}")
+        println(s"[$threadName] Total RDDs prepared for zipping: ${inputs.size}")
+        println(s"[$threadName] " + "-" * 65)
+
+        val inputProducingPlans = sparkPlans.filterNot(_.isInstanceOf[CometNativeExec])
+        if (inputs.size == inputProducingPlans.size) {
+          inputs.zip(inputProducingPlans).zipWithIndex.foreach { case ((rdd, plan), i) =>
+            val numPartitions = rdd.getNumPartitions
+            val isMismatch = numPartitions != firstNonBroadcastPlanNumPartitions
+            println(
+              s"[$threadName] --> Input RDD #${i} (partitions: $numPartitions) ${if (isMismatch) "[MISMATCH]"
+              else ""}")
+            println(s"[$threadName]     Plan Origin: ${plan.simpleStringWithNodeId}")
+            println(s"[$threadName]     Plan Output Partitioning: ${plan.outputPartitioning}")
+            println(s"[$threadName]     Plan Tree:")
+            plan.treeString.split('\n').foreach(line => println(s"[$threadName]       $line"))
+            println(s"[$threadName] " + "-" * 65)
+          }
+        } else {
+          println(
+            s"[$threadName] !! WARN: Could not correlate RDDs to Plans 1-to-1. Logging RDDs only.")
+          inputs.zipWithIndex.foreach { case (rdd, i) =>
+            println(s"[$threadName] --> Input RDD #${i}: partitions=${rdd.getNumPartitions}")
+          }
+        }
+        println(s"[$threadName] " + "=" * 67 + "TOTAL END\n")
+        // --- end debug block ---
 
         if (inputs.nonEmpty) {
           ZippedPartitionsRDD(sparkContext, inputs.toSeq)(createCometExecIter)
